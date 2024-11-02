@@ -48,7 +48,7 @@ static const Rule rules[] = {
 	{ "Geany",		NULL,		NULL,		1 << 2,		0,		-1 },
         { "st",                 NULL,           NULL,           0,              0,              -1 },
         { "obsidian",           NULL,           NULL,           1 << 1,         0,              -1 },
-	{ "konsole", 		NULL, 		NULL,		1 << 2, 	0,		-1 },
+//	{ "konsole", 		NULL, 		NULL,		1 << 2, 	0,		-1 },
 	{ "codeblocks",		NULL,		NULL,		1 << 2,		0,		-1 },
 	{ "QtCreator",		NULL,		NULL,		1 << 6,		0,		-1 },
 };
@@ -82,9 +82,9 @@ static const Layout layouts[] = {
 /* commands */
 static char dmenumon[2] = "0"; /* component of dmenucmd, manipulated in spawn() */
 static const char *dmenucmd[] = { "rofi", "-show", "drun", NULL };
-static const char *termcmd[]  = { "gnome-terminal", NULL };
+static const char *termcmd[]  = { "konsole", NULL };
 static const char *filecmd[]  = { "rofi", "-show", "filebrowser", NULL };
-static const char *nvimcmd[]  = { "konsole", NULL };
+// static const char *nvimcmd[]  = { "konsole", NULL };
 static const char *nordcmd[]  = { "nordic", NULL };
 
 #include "movestack.c"
@@ -92,7 +92,7 @@ static const Key keys[] = {
 	/* modifier                     key        function        argument */
 	{ MODKEY,                       XK_x,      spawn,          {.v = dmenucmd } },
 	{ MODKEY,                       XK_r,      spawn,          {.v = nordcmd } },
-	{ MODKEY,                       XK_n,      spawn,          {.v = nvimcmd } },
+//	{ MODKEY,                       XK_n,      spawn,          {.v = nvimcmd } },
 	{ MODKEY|ShiftMask,             XK_Return, spawn,          {.v = termcmd } },
 	{ MODKEY|ShiftMask,             XK_j,      movestack,      {.i = +1 } },
 	{ MODKEY|ShiftMask,             XK_k,      movestack,      {.i = -1 } },
