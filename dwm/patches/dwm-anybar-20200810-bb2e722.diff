@@ -1,0 +1,387 @@
+From: <Saved by Blink>
+Snapshot-Content-Location: https://dwm.suckless.org/patches/anybar/dwm-anybar-20200810-bb2e722.diff
+Subject: 
+Date: Wed, 16 Oct 2024 14:42:35 -0000
+MIME-Version: 1.0
+Content-Type: multipart/related;
+	type="text/html";
+	boundary="----MultipartBoundary--81OCJAND9CDd9mRPagpOEWsWXGgFZGYgE5i5o5eH3u----"
+
+
+------MultipartBoundary--81OCJAND9CDd9mRPagpOEWsWXGgFZGYgE5i5o5eH3u----
+Content-Type: text/html
+Content-ID: <frame-6BE307D1A7E47E9C63561741011237EA@mhtml.blink>
+Content-Transfer-Encoding: quoted-printable
+Content-Location: https://dwm.suckless.org/patches/anybar/dwm-anybar-20200810-bb2e722.diff
+
+<html><head><meta http-equiv=3D"Content-Type" content=3D"text/html; charset=
+=3Dwindows-1252"><link rel=3D"stylesheet" type=3D"text/css" href=3D"cid:css=
+-bb6480d8-240a-48f2-b549-d98c3eb460c8@mhtml.blink" /></head><body><pre styl=
+e=3D"word-wrap: break-word; white-space: pre-wrap;">From 782f63d8f858b1c14d=
+f38aaf623438d7ea2f75e1 Mon Sep 17 00:00:00 2001
+From: mihirlad55 &lt;mihirlad55@gmail.com&gt;
+Date: Mon, 10 Aug 2020 01:39:35 +0000
+Subject: [PATCH] Add support for managing external status bars
+
+This patch allows dwm to manage other status bars such as
+polybar/lemonbar without them needing to set override-redirect. For
+all intents and purposes, DWM treats this bar as if it were its own
+and as a result helps the status bar and DWM live in harmony.
+
+This has a few advantages
+* The bar does not block fullscreen windows
+* DWM makes room for the status bar, so windows do not overlap the bar
+* The bar can be hidden/killed and DWM will not keep an unsightly gap
+  where the bar was
+* DWM receives EnterNotify events when your cursor enters the bar
+
+To use another status bar, set usealtbar to 1 in your config.h and set
+altbarclass to the class name (can be found using xprop) to the class
+name of your status bar. Also make sure that if your status bar will
+be displayed on top, topbar is set to 1 in your config, and if it will
+be displayed on bottom, topbar is set to 0. This patch does not
+support bars that are not docked at the top or at the bottom of your
+monitor.
+
+The patch is developed at https://github.com/mihirlad55/dwm-anybar
+---
+ config.def.h |   3 ++
+ dwm.c        | 114 ++++++++++++++++++++++++++++++++++++++++++++-------
+ 2 files changed, 103 insertions(+), 14 deletions(-)
+
+diff --git a/config.def.h b/config.def.h
+index 1c0b587..d0d60aa 100644
+--- a/config.def.h
++++ b/config.def.h
+@@ -5,6 +5,9 @@ static const unsigned int borderpx  =3D 1;        /* border=
+ pixel of windows */
+ static const unsigned int snap      =3D 32;       /* snap pixel */
+ static const int showbar            =3D 1;        /* 0 means no bar */
+ static const int topbar             =3D 1;        /* 0 means bottom bar */
++static const int usealtbar          =3D 1;        /* 1 means use non-dwm s=
+tatus bar */
++static const char *altbarclass      =3D "Polybar"; /* Alternate bar class =
+name */
++static const char *altbarcmd        =3D "$HOME/bar.sh"; /* Alternate bar l=
+aunch command */
+ static const char *fonts[]          =3D { "monospace:size=3D10" };
+ static const char dmenufont[]       =3D "monospace:size=3D10";
+ static const char col_gray1[]       =3D "#222222";
+diff --git a/dwm.c b/dwm.c
+index 9fd0286..f149ab4 100644
+--- a/dwm.c
++++ b/dwm.c
+@@ -47,8 +47,8 @@
+ /* macros */
+ #define BUTTONMASK              (ButtonPressMask|ButtonReleaseMask)
+ #define CLEANMASK(mask)         (mask &amp; ~(numlockmask|LockMask) &amp; =
+(ShiftMask|ControlMask|Mod1Mask|Mod2Mask|Mod3Mask|Mod4Mask|Mod5Mask))
+-#define INTERSECT(x,y,w,h,m)    (MAX(0, MIN((x)+(w),(m)-&gt;wx+(m)-&gt;ww)=
+ - MAX((x),(m)-&gt;wx)) \
+-                               * MAX(0, MIN((y)+(h),(m)-&gt;wy+(m)-&gt;wh)=
+ - MAX((y),(m)-&gt;wy)))
++#define INTERSECT(x,y,w,h,m)    (MAX(0, MIN((x)+(w),(m)-&gt;mx+(m)-&gt;mw)=
+ - MAX((x),(m)-&gt;mx)) \
++                               * MAX(0, MIN((y)+(h),(m)-&gt;my+(m)-&gt;mh)=
+ - MAX((y),(m)-&gt;my)))
+ #define ISVISIBLE(C)            ((C-&gt;tags &amp; C-&gt;mon-&gt;tagset[C-=
+&gt;mon-&gt;seltags]))
+ #define LENGTH(X)               (sizeof X / sizeof X[0])
+ #define MOUSEMASK               (BUTTONMASK|PointerMotionMask)
+@@ -116,7 +116,7 @@ struct Monitor {
+ 	float mfact;
+ 	int nmaster;
+ 	int num;
+-	int by;               /* bar geometry */
++	int by, bh;           /* bar geometry */
+ 	int mx, my, mw, mh;   /* screen size */
+ 	int wx, wy, ww, wh;   /* window area  */
+ 	unsigned int seltags;
+@@ -179,6 +179,7 @@ static void incnmaster(const Arg *arg);
+ static void keypress(XEvent *e);
+ static void killclient(const Arg *arg);
+ static void manage(Window w, XWindowAttributes *wa);
++static void managealtbar(Window win, XWindowAttributes *wa);
+ static void mappingnotify(XEvent *e);
+ static void maprequest(XEvent *e);
+ static void monocle(Monitor *m);
+@@ -207,6 +208,7 @@ static void seturgent(Client *c, int urg);
+ static void showhide(Client *c);
+ static void sigchld(int unused);
+ static void spawn(const Arg *arg);
++static void spawnbar();
+ static void tag(const Arg *arg);
+ static void tagmon(const Arg *arg);
+ static void tile(Monitor *);
+@@ -216,6 +218,7 @@ static void toggletag(const Arg *arg);
+ static void toggleview(const Arg *arg);
+ static void unfocus(Client *c, int setfocus);
+ static void unmanage(Client *c, int destroyed);
++static void unmanagealtbar(Window w);
+ static void unmapnotify(XEvent *e);
+ static void updatebarpos(Monitor *m);
+ static void updatebars(void);
+@@ -230,6 +233,7 @@ static void updatewmhints(Client *c);
+ static void view(const Arg *arg);
+ static Client *wintoclient(Window w);
+ static Monitor *wintomon(Window w);
++static int wmclasscontains(Window win, const char *class, const char *name=
+);
+ static int xerror(Display *dpy, XErrorEvent *ee);
+ static int xerrordummy(Display *dpy, XErrorEvent *ee);
+ static int xerrorstart(Display *dpy, XErrorEvent *ee);
+@@ -505,8 +509,10 @@ cleanupmon(Monitor *mon)
+ 		for (m =3D mons; m &amp;&amp; m-&gt;next !=3D mon; m =3D m-&gt;next);
+ 		m-&gt;next =3D mon-&gt;next;
+ 	}
+-	XUnmapWindow(dpy, mon-&gt;barwin);
+-	XDestroyWindow(dpy, mon-&gt;barwin);
++	if (!usealtbar) {
++		XUnmapWindow(dpy, mon-&gt;barwin);
++		XDestroyWindow(dpy, mon-&gt;barwin);
++	}
+ 	free(mon);
+ }
+=20
+@@ -568,7 +574,7 @@ configurenotify(XEvent *e)
+ 				for (c =3D m-&gt;clients; c; c =3D c-&gt;next)
+ 					if (c-&gt;isfullscreen)
+ 						resizeclient(c, m-&gt;mx, m-&gt;my, m-&gt;mw, m-&gt;mh);
+-				XMoveResizeWindow(dpy, m-&gt;barwin, m-&gt;wx, m-&gt;by, m-&gt;ww, bh)=
+;
++				XMoveResizeWindow(dpy, m-&gt;barwin, m-&gt;wx, m-&gt;by, m-&gt;ww, m-&=
+gt;bh);
+ 			}
+ 			focus(NULL);
+ 			arrange(NULL);
+@@ -639,6 +645,7 @@ createmon(void)
+ 	m-&gt;nmaster =3D nmaster;
+ 	m-&gt;showbar =3D showbar;
+ 	m-&gt;topbar =3D topbar;
++	m-&gt;bh =3D bh;
+ 	m-&gt;lt[0] =3D &amp;layouts[0];
+ 	m-&gt;lt[1] =3D &amp;layouts[1 % LENGTH(layouts)];
+ 	strncpy(m-&gt;ltsymbol, layouts[0].symbol, sizeof m-&gt;ltsymbol);
+@@ -649,10 +656,13 @@ void
+ destroynotify(XEvent *e)
+ {
+ 	Client *c;
++	Monitor *m;
+ 	XDestroyWindowEvent *ev =3D &amp;e-&gt;xdestroywindow;
+=20
+ 	if ((c =3D wintoclient(ev-&gt;window)))
+ 		unmanage(c, 1);
++	else if ((m =3D wintomon(ev-&gt;window)) &amp;&amp; m-&gt;barwin =3D=3D e=
+v-&gt;window)
++		unmanagealtbar(ev-&gt;window);
+ }
+=20
+ void
+@@ -696,6 +706,9 @@ dirtomon(int dir)
+ void
+ drawbar(Monitor *m)
+ {
++	if (usealtbar)
++		return;
++
+ 	int x, w, tw =3D 0;
+ 	int boxs =3D drw-&gt;fonts-&gt;h / 9;
+ 	int boxw =3D drw-&gt;fonts-&gt;h / 6 + 2;
+@@ -1077,6 +1090,25 @@ manage(Window w, XWindowAttributes *wa)
+ 	focus(NULL);
+ }
+=20
++void
++managealtbar(Window win, XWindowAttributes *wa)
++{
++	Monitor *m;
++	if (!(m =3D recttomon(wa-&gt;x, wa-&gt;y, wa-&gt;width, wa-&gt;height)))
++		return;
++
++	m-&gt;barwin =3D win;
++	m-&gt;by =3D wa-&gt;y;
++	bh =3D m-&gt;bh =3D wa-&gt;height;
++	updatebarpos(m);
++	arrange(m);
++	XSelectInput(dpy, win, EnterWindowMask|FocusChangeMask|PropertyChangeMask=
+|StructureNotifyMask);
++	XMoveResizeWindow(dpy, win, wa-&gt;x, wa-&gt;y, wa-&gt;width, wa-&gt;heig=
+ht);
++	XMapWindow(dpy, win);
++	XChangeProperty(dpy, root, netatom[NetClientList], XA_WINDOW, 32, PropMod=
+eAppend,
++		(unsigned char *) &amp;win, 1);
++}
++
+ void
+ mappingnotify(XEvent *e)
+ {
+@@ -1097,7 +1129,9 @@ maprequest(XEvent *e)
+ 		return;
+ 	if (wa.override_redirect)
+ 		return;
+-	if (!wintoclient(ev-&gt;window))
++	if (wmclasscontains(ev-&gt;window, altbarclass, ""))
++		managealtbar(ev-&gt;window, &amp;wa);
++	else if (!wintoclient(ev-&gt;window))
+ 		manage(ev-&gt;window, &amp;wa);
+ }
+=20
+@@ -1393,7 +1427,9 @@ scan(void)
+ 			if (!XGetWindowAttributes(dpy, wins[i], &amp;wa)
+ 			|| wa.override_redirect || XGetTransientForHint(dpy, wins[i], &amp;d1))
+ 				continue;
+-			if (wa.map_state =3D=3D IsViewable || getstate(wins[i]) =3D=3D IconicSt=
+ate)
++			if (wmclasscontains(wins[i], altbarclass, ""))
++				managealtbar(wins[i], &amp;wa);
++			else if (wa.map_state =3D=3D IsViewable || getstate(wins[i]) =3D=3D Ico=
+nicState)
+ 				manage(wins[i], &amp;wa);
+ 		}
+ 		for (i =3D 0; i &lt; num; i++) { /* now the transients */
+@@ -1546,7 +1582,7 @@ setup(void)
+ 	if (!drw_fontset_create(drw, fonts, LENGTH(fonts)))
+ 		die("no fonts could be loaded.");
+ 	lrpad =3D drw-&gt;fonts-&gt;h;
+-	bh =3D drw-&gt;fonts-&gt;h + 2;
++	bh =3D usealtbar ? 0 : drw-&gt;fonts-&gt;h + 2;
+ 	updategeom();
+ 	/* init atoms */
+ 	utf8string =3D XInternAtom(dpy, "UTF8_STRING", False);
+@@ -1595,6 +1631,7 @@ setup(void)
+ 	XSelectInput(dpy, root, wa.event_mask);
+ 	grabkeys();
+ 	focus(NULL);
++	spawnbar();
+ }
+=20
+=20
+@@ -1653,6 +1690,13 @@ spawn(const Arg *arg)
+ 	}
+ }
+=20
++void
++spawnbar()
++{
++	if (*altbarcmd)
++		system(altbarcmd);
++}
++
+ void
+ tag(const Arg *arg)
+ {
+@@ -1704,7 +1748,7 @@ togglebar(const Arg *arg)
+ {
+ 	selmon-&gt;showbar =3D !selmon-&gt;showbar;
+ 	updatebarpos(selmon);
+-	XMoveResizeWindow(dpy, selmon-&gt;barwin, selmon-&gt;wx, selmon-&gt;by, s=
+elmon-&gt;ww, bh);
++	XMoveResizeWindow(dpy, selmon-&gt;barwin, selmon-&gt;wx, selmon-&gt;by, s=
+elmon-&gt;ww, selmon-&gt;bh);
+ 	arrange(selmon);
+ }
+=20
+@@ -1787,10 +1831,26 @@ unmanage(Client *c, int destroyed)
+ 	arrange(m);
+ }
+=20
++void
++unmanagealtbar(Window w)
++{
++    Monitor *m =3D wintomon(w);
++
++    if (!m)
++        return;
++
++    m-&gt;barwin =3D 0;
++    m-&gt;by =3D 0;
++    m-&gt;bh =3D 0;
++    updatebarpos(m);
++    arrange(m);
++}
++
+ void
+ unmapnotify(XEvent *e)
+ {
+ 	Client *c;
++	Monitor *m;
+ 	XUnmapEvent *ev =3D &amp;e-&gt;xunmap;
+=20
+ 	if ((c =3D wintoclient(ev-&gt;window))) {
+@@ -1798,12 +1858,16 @@ unmapnotify(XEvent *e)
+ 			setclientstate(c, WithdrawnState);
+ 		else
+ 			unmanage(c, 0);
+-	}
++	} else if ((m =3D wintomon(ev-&gt;window)) &amp;&amp; m-&gt;barwin =3D=3D=
+ ev-&gt;window)
++		unmanagealtbar(ev-&gt;window);
+ }
+=20
+ void
+ updatebars(void)
+ {
++	if (usealtbar)
++		return;
++
+ 	Monitor *m;
+ 	XSetWindowAttributes wa =3D {
+ 		.override_redirect =3D True,
+@@ -1829,11 +1893,11 @@ updatebarpos(Monitor *m)
+ 	m-&gt;wy =3D m-&gt;my;
+ 	m-&gt;wh =3D m-&gt;mh;
+ 	if (m-&gt;showbar) {
+-		m-&gt;wh -=3D bh;
++		m-&gt;wh -=3D m-&gt;bh;
+ 		m-&gt;by =3D m-&gt;topbar ? m-&gt;wy : m-&gt;wy + m-&gt;wh;
+-		m-&gt;wy =3D m-&gt;topbar ? m-&gt;wy + bh : m-&gt;wy;
++		m-&gt;wy =3D m-&gt;topbar ? m-&gt;wy + m-&gt;bh : m-&gt;wy;
+ 	} else
+-		m-&gt;by =3D -bh;
++		m-&gt;by =3D -m-&gt;bh;
+ }
+=20
+ void
+@@ -2077,6 +2141,28 @@ wintomon(Window w)
+ 	return selmon;
+ }
+=20
++int
++wmclasscontains(Window win, const char *class, const char *name)
++{
++	XClassHint ch =3D { NULL, NULL };
++	int res =3D 1;
++
++	if (XGetClassHint(dpy, win, &amp;ch)) {
++		if (ch.res_name &amp;&amp; strstr(ch.res_name, name) =3D=3D NULL)
++			res =3D 0;
++		if (ch.res_class &amp;&amp; strstr(ch.res_class, class) =3D=3D NULL)
++			res =3D 0;
++	} else
++		res =3D 0;
++
++	if (ch.res_class)
++		XFree(ch.res_class);
++	if (ch.res_name)
++		XFree(ch.res_name);
++
++	return res;
++}
++
+ /* There's no way to check accesses to destroyed windows, thus those cases=
+ are
+  * ignored (especially on UnmapNotify's). Other types of errors call Xlibs
+  * default error handler, which may call exit. */
+--=20
+2.28.0
+
+</pre></body></html>
+------MultipartBoundary--81OCJAND9CDd9mRPagpOEWsWXGgFZGYgE5i5o5eH3u----
+Content-Type: text/css
+Content-Transfer-Encoding: quoted-printable
+Content-Location: cid:css-bb6480d8-240a-48f2-b549-d98c3eb460c8@mhtml.blink
+
+@charset "utf-8";
+=0A
+------MultipartBoundary--81OCJAND9CDd9mRPagpOEWsWXGgFZGYgE5i5o5eH3u------
